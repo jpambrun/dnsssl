@@ -92,7 +92,7 @@ dnsServer.on('request', (request, response, rinfo) => {
     return Object.keys(dns.Packet.CLASS).find(key => dns.Packet.CLASS[key] === id);
   }
   const [question] = request.questions;
-  console.log(request.header.id, typeFromId(question.type), classFromId(question.class), question.name)
+  console.log(request.header.id, typeFromId(question?.type), classFromId(question?.class), question?.name)
 });
 
 dnsServer.listen(53);
@@ -118,14 +118,14 @@ let acme_txt_secret = undefined;
     return data
   }
 
-  const getAccountKey = await memoizer.fn(async () => {
+  const getAccountKey = await memoizer.fn(() => {
     console.log('Generating account private key')
-    return acme.forge.createPrivateKey()
+    return acme.crypto.createPrivateKey()
   }, { deserialize });
 
   const getCsr = await memoizer.fn(async () => {
     console.log('Generating CSR')
-    return acme.forge.createCsr({
+    return acme.crypto.createCsr({
       commonName: '*.' + BASE_DOMAIN
     });
   }, { maxAge: 1000 * 60 * 60 * 24 * 10, deserialize });
@@ -151,12 +151,12 @@ let acme_txt_secret = undefined;
   }, { maxAge: 1000 * 60 * 60 * 24 * 10, deserialize });
 
   const [key, csr, certs] = await getCerts()
-
   const options = {
     key: `-----BEGIN RSA PRIVATE KEY-----\n${acme.forge.getPemBody(key)}\n-----END RSA PRIVATE KEY-----`,
     cert: certs
   };
 
+console.log(options)
   https.createServer(options, function (req, res) {
     const searchParams = new URLSearchParams(req.url.slice(1))
     if (searchParams.get('token') !== TOKEN) {

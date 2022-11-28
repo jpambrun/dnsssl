@@ -13,7 +13,9 @@ It caches certs, accounts and keys under `./cache`.
 
 ``` bash
 npm install
-DNS_EMAIL=your.email@example.com  BASE_DOMAIN=dns.example.com npm start
+sudo setcap 'cap_net_bind_service=+ep' `which node`
+DNS_EMAIL=your.email@example.com BASE_DOMAIN=dns.example.com npm start
+PRODUCTION_LE=true DNS_EMAIL=your.email@example.com BASE_DOMAIN=dns.example.com npm start
 ```
 
 The following environnement variable  are available 
