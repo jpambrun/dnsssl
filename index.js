@@ -156,7 +156,7 @@ let acme_txt_secret = undefined;
     cert: certs
   };
 
-console.log(options)
+  setInterval(()=>{if(process.uptime() > 60*60*24*10) process.exit(0)}, 60*60*1000)
   https.createServer(options, function (req, res) {
     const searchParams = new URLSearchParams(req.url.slice(1))
     if (searchParams.get('token') !== TOKEN) {
