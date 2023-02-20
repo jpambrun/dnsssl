@@ -108,8 +108,8 @@ const generateCsr = async () => {
 };
 
 const areCertsValid = async () => {
-  const key = await fsp.readFile(`./secret/${BASE_DOMAIN}.key`).catch(() => undefined)
-  const certs = await fsp.readFile(`./secret/${BASE_DOMAIN}.crt`).catch(() => undefined)
+  const key = await fsp.readFile(`./secret/${BASE_DOMAIN}.key`,  { encoding: 'utf8' }).catch(() => undefined)
+  const certs = await fsp.readFile(`./secret/${BASE_DOMAIN}.crt`,  { encoding: 'utf8' }).catch(() => undefined)
   if (key === undefined || certs === undefined) return false;
 
   const parsedCert = new crypto.X509Certificate(certs);
@@ -157,8 +157,8 @@ http.createServer( async function (req, res) {
     res.end("Not authorized\n");
     return
   }
-  const key = await fsp.readFile(`./secret/${BASE_DOMAIN}.key`).catch(() => undefined)
-  const certs = await fsp.readFile(`./secret/${BASE_DOMAIN}.crt`).catch(() => undefined)
+  const key = await fsp.readFile(`./secret/${BASE_DOMAIN}.key`,  { encoding: 'utf8' }).catch(() => undefined)
+  const certs = await fsp.readFile(`./secret/${BASE_DOMAIN}.crt`,  { encoding: 'utf8' }).catch(() => undefined)
   const options = {
     key: `-----BEGIN RSA PRIVATE KEY-----\n${acme.forge.getPemBody(key)}\n-----END RSA PRIVATE KEY-----`,
     cert: certs
