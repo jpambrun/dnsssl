@@ -13,6 +13,7 @@ const BASE_DOMAIN = process.env['BASE_DOMAIN'];
 const EXTERNAL_IP = process.env['EXTERNAL_IP'] || await publicIpv4();
 const DNS_EMAIL = process.env['DNS_EMAIL'];
 const PRODUCTION_LE = ['1', 'true', 't', 'TRUE'].includes(process.env['PRODUCTION_LE'])
+const TOKEN = process.env['TOKEN'] || 'secret';
 
 let acme_txt_secret = undefined;
 
@@ -149,7 +150,7 @@ const validateOrGenerateCerts = async () => {
   }
 }
 
-http.createServer(options, async function (req, res) {
+http.createServer( async function (req, res) {
   const searchParams = new URLSearchParams(req.url.slice(1))
   if (searchParams.get('token') !== TOKEN) {
     res.writeHead(403);
