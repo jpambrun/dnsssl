@@ -1,16 +1,16 @@
-const dns = require('dns2');
-const acme = require('acme-client');
-const fsp = require('fs').promises;
-const crypto = require("crypto")
-const { networkInterfaces } = require('os')
+import dns from 'dns2'
+import acme from 'acme-client';
+import { promises as fsp } from 'fs';
+import crypto from "crypto"
+import { publicIpv4 } from 'public-ip';
+import * as http from 'http'
 
 if (!process.env['BASE_DOMAIN']) throw new Error('BASE_DOMAIN env var must be set')
 if (!process.env['DNS_EMAIL']) throw new Error('DNS_EMAIL env var must be set')
 
-const firstExternalV4Ip = Object.values(networkInterfaces()).flat(2).filter(addr => addr.family === 'IPv4' && !addr.internal)[0].address
 
 const BASE_DOMAIN = process.env['BASE_DOMAIN'];
-const EXTERNAL_IP = process.env['EXTERNAL_IP'] || firstExternalV4Ip;
+const EXTERNAL_IP = process.env['EXTERNAL_IP'] || await publicIpv4();
 const DNS_EMAIL = process.env['DNS_EMAIL'];
 const PRODUCTION_LE = ['1', 'true', 't', 'TRUE'].includes(process.env['PRODUCTION_LE'])
 
@@ -148,6 +148,25 @@ const validateOrGenerateCerts = async () => {
 
   }
 }
+
+http.createServer(options, async function (req, res) {
+  const searchParams = new URLSearchParams(req.url.slice(1))
+  if (searchParams.get('token') !== TOKEN) {
+    res.writeHead(403);
+    res.end("Not authorized\n");
+    return
+  }
+  const key = await fsp.readFile(`./secret/${BASE_DOMAIN}.key`).catch(() => undefined)
+  const certs = await fsp.readFile(`./secret/${BASE_DOMAIN}.crt`).catch(() => undefined)
+  const options = {
+    key: `-----BEGIN RSA PRIVATE KEY-----\n${acme.forge.getPemBody(key)}\n-----END RSA PRIVATE KEY-----`,
+    cert: certs
+  };
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(options));
+
+}).listen(8080);
+
 
 dnsServer.listen(53);
 dnsServer.on('error', console.error);
