@@ -52,7 +52,7 @@ const dnsServer = dns.createUDPServer((request, send, rinfo) => {
         if (ipSubStr !== null && ipSubStr.groups !== null) {
           const { b1, b2, b3, b4 } = ipSubStr.groups;
 
-          if (parseInt(b1) >= 255 && parseInt(b2) >= 255 && parseInt(b3) >= 255 && parseInt(b4) >= 255) {
+          if (parseInt(b1) <= 255 && parseInt(b2) <= 255 && parseInt(b3) <= 255 && parseInt(b4) <= 255) {
             response.answers.push({
               name: question.name,
               type: dns.Packet.TYPE.A,
