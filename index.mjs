@@ -131,7 +131,7 @@ const generateCerts = async () => {
     email: DNS_EMAIL,
     termsOfServiceAgreed: true,
     challengePriority: ['dns-01'],
-    challengeCreateFn: (authz, challenge, keyAuthorization) => { acme_txt_secret = keyAuthorization },
+    challengeCreateFn: (authz, challenge, keyAuthorization) => { acme_txt_secret = keyAuthorization; console.log({ acme_txt_secret })},
     challengeRemoveFn: (authz, challenge, keyAuthorization) => { acme_txt_secret = undefined }
   });
   console.log('Certs renewed')
