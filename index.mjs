@@ -22,16 +22,28 @@ const dnsServer = dns.createUDPServer((request, send, rinfo) => {
   request.questions.forEach(question => {
     switch (question.type) {
       case dns.Packet.TYPE.NS: {
-        if (question.name.toLowerCase() === BASE_DOMAIN) {
+        if (question.name.toLowerCase().includes(BASE_DOMAIN)) {
           response.answers.push({
             name: question.name,
             type: dns.Packet.TYPE.NS,
             class: dns.Packet.CLASS.IN,
             ttl: 300,
-            ns: BASE_DOMAIN
+            ns: question.name.toLowerCase() 
           });
 
         }
+        break;
+      }
+       case dns.Packet.TYPE.CAA: {
+          response.answers.push({
+            name: question.name,
+            type: dns.Packet.TYPE.CAA,
+            class: dns.Packet.CLASS.IN,
+            ttl: 300,
+	    flag: 0,
+	    tag: 'issuewild',
+            value: 'letsencrypt.org'
+          });
         break;
       }
       case dns.Packet.TYPE.TXT: {
@@ -41,7 +53,7 @@ const dnsServer = dns.createUDPServer((request, send, rinfo) => {
             name: question.name,
             type: dns.Packet.TYPE.TXT,
             class: dns.Packet.CLASS.IN,
-            ttl: 1,
+            ttl: 10,
             data: acme_txt_secret
           });
         }
@@ -79,7 +91,6 @@ const dnsServer = dns.createUDPServer((request, send, rinfo) => {
     }
   });
 
-
   send(response);
 });
 
@@ -100,16 +111,16 @@ const getAccountKey = () => {
   return acme.crypto.createPrivateKey()
 };
 
-const generateCsr = async () => {
+const generateCsr = async (subdomain) => {
   console.log('Generating CSR')
   return acme.crypto.createCsr({
-    commonName: '*.' + BASE_DOMAIN
+	  commonName: '*.' +  (subdomain ? `${subdomain}.` : '') + BASE_DOMAIN
   });
 };
 
-const areCertsValid = async () => {
-  const key = await fsp.readFile(`./secret/${BASE_DOMAIN}.key`,  { encoding: 'utf8' }).catch(() => undefined)
-  const certs = await fsp.readFile(`./secret/${BASE_DOMAIN}.crt`,  { encoding: 'utf8' }).catch(() => undefined)
+const areCertsValid = async (subdomain='') => {
+  const key = await fsp.readFile(`./secret/${subdomain + BASE_DOMAIN}.key`,  { encoding: 'utf8' }).catch(() => undefined)
+  const certs = await fsp.readFile(`./secret/${subdomain + BASE_DOMAIN}.crt`,  { encoding: 'utf8' }).catch(() => undefined)
   if (key === undefined || certs === undefined) return false;
 
   const parsedCert = new crypto.X509Certificate(certs);
@@ -119,9 +130,9 @@ const areCertsValid = async () => {
 }
 
 
-const generateCerts = async () => {
-  const [key, csr] = await generateCsr();
-  console.log('Reqesting certs')
+const generateCerts = async (subdomain='') => {
+  const [key, csr] = await generateCsr(subdomain);
+  console.log(`Reqesting certs for *.${subdomain + BASE_DOMAIN}`)
   const client = new acme.Client({
     directoryUrl: PRODUCTION_LE ? acme.directory.letsencrypt.production : acme.directory.letsencrypt.staging,
     accountKey: await getAccountKey(),
@@ -135,18 +146,18 @@ const generateCerts = async () => {
     challengeRemoveFn: (authz, challenge, keyAuthorization) => { acme_txt_secret = undefined }
   });
   console.log('Certs renewed')
-  await fsp.writeFile(`./secret/${BASE_DOMAIN}.key`, key)
-  await fsp.writeFile(`./secret/${BASE_DOMAIN}.crt`, certs)
+  await fsp.writeFile(`./secret/${subdomain + BASE_DOMAIN}.key`, key)
+  await fsp.writeFile(`./secret/${subdomain + BASE_DOMAIN}.crt`, certs)
   return [key, certs]
 };
 
 const validateOrGenerateCerts = async () => {
-  if (await areCertsValid()) {
+  if (await areCertsValid() && await areCertsValid('127-0-0-1')) {
     console.log('certs are still valid')
   } else {
     console.log('certs are need to be renewed')
-    generateCerts()
-
+    await generateCerts()
+    await generateCerts('127-0-0-1')
   }
 }
 
@@ -157,8 +168,8 @@ http.createServer( async function (req, res) {
     res.end("Not authorized\n");
     return
   }
-  const key = await fsp.readFile(`./secret/${BASE_DOMAIN}.key`,  { encoding: 'utf8' }).catch(() => undefined)
-  const certs = await fsp.readFile(`./secret/${BASE_DOMAIN}.crt`,  { encoding: 'utf8' }).catch(() => undefined)
+  const key = await fsp.readFile(`./secret/${(searchParams.get('subdomain') || '') + BASE_DOMAIN}.key`,  { encoding: 'utf8' }).catch(() => undefined)
+  const certs = await fsp.readFile(`./secret/${(searchParams.get('subdomain') || '') +  BASE_DOMAIN}.crt`,  { encoding: 'utf8' }).catch(() => undefined)
   const options = {
     key: `-----BEGIN RSA PRIVATE KEY-----\n${acme.forge.getPemBody(key)}\n-----END RSA PRIVATE KEY-----`,
     cert: certs
