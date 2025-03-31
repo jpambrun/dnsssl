@@ -11,12 +11,12 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "acme-client": "^5.0.0",
-    "dns2": "^2.0.5",
-    "memoize-fs": "^2.2.0",
-    "public-ip": "^6.0.1"
+    "acme-client": "^5.4.0",
+    "dns2": "^2.1.0",
+    "memoize-fs": "^4.0.0",
+    "public-ip": "^6.0.2"
   },
   "devDependencies": {
-    "nodemon": "^2.0.20"
+    "nodemon": "^3.1.4"
   }
 }
