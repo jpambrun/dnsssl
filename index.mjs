@@ -63,7 +63,7 @@ dnsServer.on("request", (request, send, rinfo) => {
       }
       case dns.Packet.TYPE.TXT: {
         if (question.name.toLowerCase().includes("_acme-challenge.") && acme_txt_secret) {
-          console.log(question.name.toLowerCase(), acme_txt_secret, "here");
+          console.log(question.name.toLowerCase(), acme_txt_secret);
           response.answers.push({
             name: question.name,
             type: dns.Packet.TYPE.TXT,
@@ -74,23 +74,17 @@ dnsServer.on("request", (request, send, rinfo) => {
         }
 
         if (question.name.toLowerCase().includes("_secret.")) {
-          // console.log("secret", question.name.toLowerCase());
           const subdomain = "";
           const key = fs.readFileSync(`./secret/${(subdomain || "") + BASE_DOMAIN}.key`, { encoding: "utf8" });
           const certs = fs.readFileSync(`./secret/${(subdomain || "") + BASE_DOMAIN}.crt`, { encoding: "utf8" });
 
-          const options = {
-            key: `-----BEGIN RSA PRIVATE KEY-----\n${acme.forge.getPemBody(key)}\n-----END RSA PRIVATE KEY-----`,
-            cert: certs,
-          };
-          console.log("secret push");
-
           const isTCP = rinfo instanceof Socket;
 
-          const longString = JSON.stringify(options);
-          const chunks = [];
-          for (let i = 0; i < longString.length; i += 255) {
-            chunks.push(longString.substring(i, i + 255));
+          let chunks = [];
+          if (question.name.toLowerCase().includes("key")) {
+            chunks = key.split("\n");
+          } else if (question.name.toLowerCase().includes("crt")) {
+            chunks = certs.split("\n");
           }
 
           response.header.tc = isTCP ? 0 : 1;
@@ -197,30 +191,65 @@ const validateOrGenerateCerts = async () => {
       console.log(`Certificates for *.${subdomain} are valid`);
     }
   }
-  await Promise.all([processSubdomain(""), processSubdomain("127-0-0-1")]).catch((err) => {
-    console.error("Error generating certs", err);
-    process.exit(1);
-  });
+
+  // sequential since the secret var is global..
+  for (const subdomain of ["", "127-0-0-1"]) {
+    await processSubdomain(subdomain);
+  }
+
+  console.log("Certs generated, please will shutdown, please resart the server");
+  process.exit(0);
+
+
+  // await Promise.all([processSubdomain(""), processSubdomain("127-0-0-1")]).catch((err) => {
+  //   console.error("Error generating certs", err);
+  //   process.exit(1);
+  // });
 };
 
 dnsServer.on("error", console.error);
 
 validateOrGenerateCerts();
-const intervalID = setInterval(validateOrGenerateCerts, 1 * 60 * 60 * 1000);
+setInterval(validateOrGenerateCerts, 1 * 60 * 60 * 1000);
 
-(async () => {
-  const closed = new Promise((resolve) => process.on("SIGINT", resolve));
-  await dnsServer.listen({
-    udp: { port: 53, address: "0.0.0.0" },
-    tcp: { port: 53, address: "0.0.0.0" },
+process.on("SIGINT", () => process.exit());
+
+await dnsServer.listen({
+  udp: { port: 53, address: "0.0.0.0" },
+  tcp: { port: 53, address: "0.0.0.0" },
+});
+
+console.log("DNS Listening.");
+console.log(dnsServer.addresses());
+
+const cert = Bun.file("secret/ip.dev.health.crt");
+const key = Bun.file("secret/ip.dev.health.key");
+
+if ((await cert.exists()) && (await key.exists())) {
+  console.log("Certs exist, starting https server");
+  Bun.serve({
+    port: 443,
+    tls: {
+      cert,
+      key,
+    },
+    fetch: (req) => {
+      const requestUrl = new URL(req.url);
+      if (requestUrl.pathname === "/health") {
+        return new Response("ok");
+      }
+
+      if (requestUrl.searchParams.get("token") === TOKEN) {
+        if (requestUrl.pathname === "/crt") {
+          return new Response(cert);
+        }
+        if (requestUrl.pathname === "/key") {
+          return new Response(key);
+        }
+      } else {
+        return new Response("Invalid token", { status: 403 });
+      }
+      return new Response("Not found", { status: 404 });
+    },
   });
-  console.log("Listening.");
-  console.log(dnsServer.addresses());
-  await closed;
-  process.stdout.write("\n");
-  await dnsServer.close();
-  clearInterval(intervalID);
-
-  console.log("Closed.");
-  process.exit(0);
-})();
+}
