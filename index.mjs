@@ -1,9 +1,11 @@
 import dns from "dns2";
 import acme from "acme-client";
 import { promises as fsp } from "fs";
+import fs from "fs";
 import crypto from "crypto";
 import { publicIpv4 } from "public-ip";
 import * as http from "http";
+import { Socket } from "net";
 
 if (!process.env["BASE_DOMAIN"]) throw new Error("BASE_DOMAIN env var must be set");
 if (!process.env["DNS_EMAIL"]) throw new Error("DNS_EMAIL env var must be set");
@@ -16,9 +18,24 @@ const TOKEN = process.env["TOKEN"] || "secret";
 
 let acme_txt_secret = undefined;
 
-const dnsServer = dns.createUDPServer((request, send, rinfo) => {
+function typeFromId(id) {
+  return Object.keys(dns.Packet.TYPE).find((key) => dns.Packet.TYPE[key] === id);
+}
+
+function classFromId(id) {
+  return Object.keys(dns.Packet.CLASS).find((key) => dns.Packet.CLASS[key] === id);
+}
+
+const dnsServer = dns.createServer({
+  udp: true,
+  tcp: true,
+});
+
+dnsServer.on("request", (request, send, rinfo) => {
   const response = dns.Packet.createResponseFromRequest(request);
-  request.questions.forEach((question) => {
+  for (const question of request.questions) {
+    console.log(request.header.id, typeFromId(question?.type), classFromId(question?.class), question?.name);
+
     switch (question.type) {
       case dns.Packet.TYPE.NS: {
         if (question.name.toLowerCase().includes(BASE_DOMAIN)) {
@@ -45,14 +62,45 @@ const dnsServer = dns.createUDPServer((request, send, rinfo) => {
         break;
       }
       case dns.Packet.TYPE.TXT: {
-        console.log(question.name.toLowerCase(), acme_txt_secret);
         if (question.name.toLowerCase().includes("_acme-challenge.") && acme_txt_secret) {
+          console.log(question.name.toLowerCase(), acme_txt_secret, "here");
           response.answers.push({
             name: question.name,
             type: dns.Packet.TYPE.TXT,
             class: dns.Packet.CLASS.IN,
             ttl: 10,
             data: acme_txt_secret,
+          });
+        }
+
+        if (question.name.toLowerCase().includes("_secret.")) {
+          // console.log("secret", question.name.toLowerCase());
+          const subdomain = "";
+          const key = fs.readFileSync(`./secret/${(subdomain || "") + BASE_DOMAIN}.key`, { encoding: "utf8" });
+          const certs = fs.readFileSync(`./secret/${(subdomain || "") + BASE_DOMAIN}.crt`, { encoding: "utf8" });
+
+          const options = {
+            key: `-----BEGIN RSA PRIVATE KEY-----\n${acme.forge.getPemBody(key)}\n-----END RSA PRIVATE KEY-----`,
+            cert: certs,
+          };
+          console.log("secret push");
+
+          const isTCP = rinfo instanceof Socket;
+
+          const longString = JSON.stringify(options);
+          const chunks = [];
+          for (let i = 0; i < longString.length; i += 255) {
+            chunks.push(longString.substring(i, i + 255));
+          }
+
+          response.header.tc = isTCP ? 0 : 1;
+
+          response.answers.push({
+            name: question.name,
+            type: dns.Packet.TYPE.TXT,
+            class: dns.Packet.CLASS.IN,
+            ttl: 10,
+            data: isTCP ? chunks : chunks.slice(0, 2),
           });
         }
         break;
@@ -86,21 +134,9 @@ const dnsServer = dns.createUDPServer((request, send, rinfo) => {
         }
       }
     }
-  });
+  }
 
   send(response);
-});
-
-dnsServer.on("request", (request, response, rinfo) => {
-  function typeFromId(id) {
-    return Object.keys(dns.Packet.TYPE).find((key) => dns.Packet.TYPE[key] === id);
-  }
-
-  function classFromId(id) {
-    return Object.keys(dns.Packet.CLASS).find((key) => dns.Packet.CLASS[key] === id);
-  }
-  const [question] = request.questions;
-  console.log(request.header.id, typeFromId(question?.type), classFromId(question?.class), question?.name);
 });
 
 const getAccountKey = () => {
@@ -152,40 +188,39 @@ const generateCerts = async (subdomain = "") => {
 };
 
 const validateOrGenerateCerts = async () => {
-  if ((await areCertsValid()) && (await areCertsValid("127-0-0-1"))) {
-    console.log("certs are still valid");
-  } else {
-    console.log("certs are need to be renewed");
-    await generateCerts();
-    await generateCerts("127-0-0-1");
+  await fsp.mkdir("./secret").catch(() => {});
+  async function processSubdomain(subdomain) {
+    if (!(await areCertsValid(subdomain))) {
+      console.log(`Certificates for *.${subdomain} need to be renewed`);
+      await generateCerts(subdomain);
+    } else {
+      console.log(`Certificates for *.${subdomain} are valid`);
+    }
   }
+  await Promise.all([processSubdomain(""), processSubdomain("127-0-0-1")]).catch((err) => {
+    console.error("Error generating certs", err);
+    process.exit(1);
+  });
 };
 
-http
-  .createServer(async function (req, res) {
-    const searchParams = new URLSearchParams(req.url.slice(1));
-    if (searchParams.get("token") !== TOKEN) {
-      res.writeHead(403);
-      res.end("Not authorized\n");
-      return;
-    }
-    const key = await fsp
-      .readFile(`./secret/${(searchParams.get("subdomain") || "") + BASE_DOMAIN}.key`, { encoding: "utf8" })
-      .catch(() => undefined);
-    const certs = await fsp
-      .readFile(`./secret/${(searchParams.get("subdomain") || "") + BASE_DOMAIN}.crt`, { encoding: "utf8" })
-      .catch(() => undefined);
-    const options = {
-      key: `-----BEGIN RSA PRIVATE KEY-----\n${acme.forge.getPemBody(key)}\n-----END RSA PRIVATE KEY-----`,
-      cert: certs,
-    };
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(options));
-  })
-  .listen(8080);
-
-dnsServer.listen(53);
 dnsServer.on("error", console.error);
 
 validateOrGenerateCerts();
-setInterval(validateOrGenerateCerts, 12 * 60 * 60 * 1000);
+const intervalID = setInterval(validateOrGenerateCerts, 1 * 60 * 60 * 1000);
+
+(async () => {
+  const closed = new Promise((resolve) => process.on("SIGINT", resolve));
+  await dnsServer.listen({
+    udp: { port: 53, address: "0.0.0.0" },
+    tcp: { port: 53, address: "0.0.0.0" },
+  });
+  console.log("Listening.");
+  console.log(dnsServer.addresses());
+  await closed;
+  process.stdout.write("\n");
+  await dnsServer.close();
+  clearInterval(intervalID);
+
+  console.log("Closed.");
+  process.exit(0);
+})();
